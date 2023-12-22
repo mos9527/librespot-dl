@@ -1,11 +1,14 @@
-import setuptools, pyncm
+import sys,os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import setuptools, librespot_dl
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
     name="librespot-dl",
-    version=pyncm.__version__,
+    version=librespot_dl.__version__,
     author="greats3an",
     author_email="greats3an@gmail.com",
     description="",
@@ -19,6 +22,6 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     install_requires=["librespot"],
-    entry_points={"console_scripts": ["pyncm=pyncm.__main__:__main__"]},
+    entry_points={"console_scripts": ["librespot-dl = librespot_dl.__main__:__main__"]},
     python_requires=">=3.8",
 )

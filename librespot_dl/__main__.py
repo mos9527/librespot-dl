@@ -25,6 +25,9 @@ logger = getLogger("librespot-dl")
 progress = tqdm(bar_format="{desc}: {percentage:.1f}%|{bar}| {n:.2f}/{total_fmt} {elapsed}<{remaining}")
 pool = ThreadPoolExecutor(16)
 
+def make_legal_4_filename(string,sub=set('\x00\\/:<>|?*".')):
+    return "".join([c if not c in sub else chr(ord(c) + 0xFEE0) for c in string])
+
 class QualityPreference(enum.Enum):
     PREFER_BEST_QUALITY = 0x00
     PREFER_WORST_QUALITY = 0x01
@@ -85,7 +88,7 @@ def parse_args():
     group.add_argument("--email", help="Spotify account email address", default='')
     group.add_argument("--password", help="Spotify account password", default='')    
     group = parser.add_argument_group("Download Options")
-    group.add_argument("--template","-t", help="Output filename template", default="{artist} - {title}")
+    group.add_argument("--template","-t", help="Output filename template. \n Avaialble ones are:\n\t{title},{artist},{albumartist},{album},{tracknumber},{date},{copyright},{discnumber}", default="{artist} - {title}")
     group.add_argument("--output","-o", help="Output directory", default='.')
     group.add_argument("--quality", help="Audio quality", default="BEST", choices=["BEST","WORST"])
     group.add_argument("url",help="Spotify track/album/playlist URL", default='')
@@ -251,11 +254,11 @@ def download_track(tid : TrackId, blocking = True):
 
         cover_art_fid = audio_stream.track.album.cover_group.image[0].file_id
         cover_art = get_image(cdn, cover_art_fid, stream=False)
-        meta = {k:v if (type(v) == str) else ",".join([str(i) for i in v]) for k,v in get_track_metadata(audio_stream.track).items()}
+        meta = {k:make_legal_4_filename(v if (type(v) == str) else ",".join([str(i) for i in v])) for k,v in get_track_metadata(audio_stream.track).items()}
         save_as = os.path.join(args.output.format(**meta),args.template.format(**meta))
         ext = {SuperAudioFormat.AAC:'.aac',SuperAudioFormat.VORBIS:'.ogg',SuperAudioFormat.MP3:'.mp3'}[audio_format]
         save_as += ext
-
+       
         os.makedirs(os.path.dirname(save_as),exist_ok=True)
         logger.info("Downloading %s", save_as)
         with open(save_as, 'wb') as f:
@@ -269,7 +272,7 @@ def download_track(tid : TrackId, blocking = True):
                 return
             except Exception as e:
                 logger.error("Failed #%d attempt. Retrying: %s" % (_,e))
-        logger.fatal("Giving up after %d tries" % _)
+        logger.fatal("Giving up after %d tries" % (_ + 1))
     else:
         pool.submit(worker_job)
 
