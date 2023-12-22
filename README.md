@@ -1,5 +1,5 @@
-# Project Name
-librespot-dl
+# librespot-dl
+---
 
 ## Installation
 ```
@@ -7,10 +7,8 @@ pip install git+https://github.com/mos9527/librespot-dl
 ```
 
 ## Usage
+`librespot-dl -h` (or `python -m librespot_dl`)
 ```
-librespot-dl -h
-(or python -m librespot_dl -h)
-
 options:
   -h, --help            show this help message and exit
   --log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}
