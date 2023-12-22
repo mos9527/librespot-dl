@@ -6,9 +6,9 @@ import json
 import os
 import sys, argparse
 import re
+import time
 
 from logging import exception, getLogger, basicConfig
-from threading import Thread
 import typing
 
 
@@ -37,15 +37,6 @@ class QualityPicker(AudioQualityPicker):
 
     def __init__(self, preferred: QualityPreference):
         self.preferred = preferred
-
-    @staticmethod
-    def get_vorbis_file(files: typing.List[Metadata.AudioFile]):
-
-        for file in files:
-            if file.HasField("format") and SuperAudioFormat.get(
-                    file.format) == SuperAudioFormat.VORBIS:
-                return file
-        return None
 
     def get_file(self, files: typing.List[Metadata.AudioFile]):
         ffiles = [file for file in files if file.HasField("format")]
@@ -101,7 +92,9 @@ def login():
     global session
     if args.load:
         logger.info("Loading credentials from file %s" % args.load)
-        session = Session.Builder().stored_file(args.load).create()
+        conf = Session.Configuration.Builder().build()
+        conf.store_credentials = False
+        session = Session.Builder(conf).stored_file(args.load).create()
     else:
         session = Session.Builder().user_pass(args.email, args.password).create()
         if args.save:  
@@ -252,7 +245,7 @@ def download_track(tid : TrackId, blocking = True):
         audio_stream = session.content_feeder().load(tid,QualityPicker(args.quality), False, None)
         audio_format = audio_stream.input_stream._Streamer__audio_format
 
-        cover_art_fid = audio_stream.track.album.cover_group.image[0].file_id
+        cover_art_fid = audio_stream.track.album.cover_group.image[-1].file_id # Usually the largest one
         cover_art = get_image(cdn, cover_art_fid, stream=False)
         meta = {k:make_legal_4_filename(v if (type(v) == str) else ",".join([str(i) for i in v])) for k,v in get_track_metadata(audio_stream.track).items()}
         save_as = os.path.join(args.output.format(**meta),args.template.format(**meta))
@@ -266,12 +259,13 @@ def download_track(tid : TrackId, blocking = True):
             write_bytes(audio_stream.input_stream.stream(),f,size)
         tag_audio(save_as, audio_stream.track, cover_art.content)
     if blocking:
-        for _ in range(0,5):
+        for _ in range(0,10):
             try:
                 worker_job()
                 return
             except Exception as e:
                 logger.error("Failed #%d attempt. Retrying: %s" % (_,e))
+                time.sleep(1)
         logger.fatal("Giving up after %d tries" % (_ + 1))
     else:
         pool.submit(worker_job)
