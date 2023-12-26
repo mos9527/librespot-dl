@@ -15,8 +15,9 @@ import typing
 from librespot.audio import SuperAudioFormat, CdnManager
 from librespot.proto import Metadata_pb2 as Metadata
 from librespot.audio.decoders import AudioQuality, AudioQualityPicker
-from librespot.core import Session
+from librespot.core import Session, ApiClient
 from librespot.metadata import TrackId, AlbumId, PlaylistId
+from librespot import util
 from tqdm.std import tqdm
 
 session : Session
@@ -82,6 +83,7 @@ def parse_args():
     group.add_argument("--template","-t", help="Output filename template. \n Avaialble ones are:\n\t{title},{artist},{albumartist},{album},{tracknumber},{date},{copyright},{discnumber}", default="{artist} - {title}")
     group.add_argument("--output","-o", help="Output directory", default='.')
     group.add_argument("--quality", help="Audio quality", default="BEST", choices=["BEST","WORST"])
+    group.add_argument("--no-lrc",help="Omit writing the lyrics",action='store_true',default=False)
     group.add_argument("url",help="Spotify track/album/playlist URL", default='')
     args = parser.parse_args()
     args.load = os.path.expanduser(args.load)
@@ -230,6 +232,21 @@ def write_bytes(fd,out_fd,size,chunk_sizes=None,chunk_process=None,default_chunk
     out_fd.write(b"\x00" * (size - bytes_wrote))
     return bytes_wrote
 
+def get_lyrics(self : ApiClient, track_id: TrackId, language = 'en-US'):
+    response = self.send(
+        "GET", 
+        '/color-lyrics/v2/track/%s?clientLanguage=%s' % (TrackId.base62.encode(util.hex_to_bytes(track_id.hex_id())).decode(),language.replace('-','_')),
+        {
+            'User-Agent':'Spotify/8.8.96.364 Android/30', # adding these llows 'alternative' translation lyrics to be retrived
+            'app-platform' : 'Android',                   # ...
+            'Accept':'application/json',
+            'Accept-Language':language
+        }, None
+    )
+    if response.status_code != 200:
+        raise IOError("{}".format(response.status_code))
+    return response
+
 def get_image(self : CdnManager, file_id: bytes, stream=True):
     response = self._CdnManager__session.client() \
         .get(self._CdnManager__session.get_user_attribute("image-url")
@@ -243,21 +260,50 @@ def download_track(tid : TrackId, blocking = True):
         cf = session.content_feeder()
         cdn = session.cdn()
         audio_stream = session.content_feeder().load(tid,QualityPicker(args.quality), False, None)
+
         audio_format = audio_stream.input_stream._Streamer__audio_format
+        ext = {SuperAudioFormat.AAC:'.aac',SuperAudioFormat.VORBIS:'.ogg',SuperAudioFormat.MP3:'.mp3'}[audio_format]
+
+        meta = {k:make_legal_4_filename(v if (type(v) == str) else ",".join([str(i) for i in v])) for k,v in get_track_metadata(audio_stream.track).items()}
+        save_as = os.path.join(args.output.format(**meta),args.template.format(**meta))
+        audio_save_as = save_as + ext
+        lyrics_save_as = save_as + '.lrc'                
 
         cover_art_fid = audio_stream.track.album.cover_group.image[-1].file_id # Usually the largest one
         cover_art = get_image(cdn, cover_art_fid, stream=False)
-        meta = {k:make_legal_4_filename(v if (type(v) == str) else ",".join([str(i) for i in v])) for k,v in get_track_metadata(audio_stream.track).items()}
-        save_as = os.path.join(args.output.format(**meta),args.template.format(**meta))
-        ext = {SuperAudioFormat.AAC:'.aac',SuperAudioFormat.VORBIS:'.ogg',SuperAudioFormat.MP3:'.mp3'}[audio_format]
-        save_as += ext
-       
-        os.makedirs(os.path.dirname(save_as),exist_ok=True)
-        logger.info("Downloading %s", save_as)
-        with open(save_as, 'wb') as f:
+
+        os.makedirs(os.path.dirname(audio_save_as),exist_ok=True)
+        logger.info("Downloading %s", audio_save_as)
+        with open(audio_save_as, 'wb') as f:
             size = audio_stream.input_stream.stream().size()
             write_bytes(audio_stream.input_stream.stream(),f,size)
-        tag_audio(save_as, audio_stream.track, cover_art.content)
+        tag_audio(audio_save_as, audio_stream.track, cover_art.content)
+        if not args.no_lrc:
+            logger.info("Writing %s", lyrics_save_as)
+            lyrics = get_lyrics(session.api(), tid)
+            lyrics = lyrics.json()
+            with open(lyrics_save_as, 'w', encoding='utf-8') as f:           
+                if lyrics['lyrics']['syncType'] == 'LINE_SYNCED':
+                    pass
+                elif lyrics['lyrics']['syncType'] == 'UNSYNCED':
+                    f.write('[00:00.000] These lyrics aren\'t synced to the song yet.\n')
+                else:
+                    logger.error('Unsupported lyrics sync type: %s' % lyrics['lyrics']['syncType'])
+                    return
+                for index, line in enumerate(lyrics['lyrics']['lines']):
+                    total_lines = [line['words']]
+                    for alt in lyrics['lyrics']['alternatives']:
+                        total_lines.append(alt['lines'][min(len(alt['lines'])-1,index)])                    
+                    if lyrics['lyrics']['syncType'] == 'LINE_SYNCED':
+                        timestamp_ms = line['startTimeMs']
+                    elif lyrics['lyrics']['syncType'] == 'UNSYNCED':                    
+                        timestamp_ms = (index+1) * 1000
+                    minutes, seconds = divmod(int(timestamp_ms // 1000), 60)
+                    milliseconds = int(timestamp_ms % 1000)
+                    timestamp = f"[{minutes:02}:{seconds:02}.{milliseconds:03}]"
+                    for l in total_lines:
+                        f.write('%s %s\n' % (timestamp,l))
+                
     if blocking:
         for _ in range(0,10):
             try:
@@ -283,7 +329,7 @@ def download(url):
         logger.fatal("Invalid URL %s (%s)" % (url,e))
     if (itype == "track"):
         progress.total = 1
-        download_track(TrackId.from_base62(iid))
+        download_track(TrackId.from_base62(iid), True)
     elif (itype == "album"):
         aid = AlbumId.from_base62(iid)
         resp = session.api().get_metadata_4_album(aid)
