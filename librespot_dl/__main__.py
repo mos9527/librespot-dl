@@ -301,8 +301,8 @@ def download_track(tid : TrackId, blocking = True):
                     elif lyrics['lyrics']['syncType'] == 'UNSYNCED':                    
                         timestamp_ms = (index+1) * 1000
                     minutes, seconds = divmod(int(timestamp_ms // 1000), 60)
-                    milliseconds = int(timestamp_ms % 1000)
-                    timestamp = f"[{minutes:02}:{seconds:02}.{milliseconds:03}]"
+                    centiseconds = int(timestamp_ms % 1000) // 10
+                    timestamp = f"[{minutes:02}:{seconds:02}.{centiseconds:02}]"
                     for l in total_lines:
                         f.write('%s %s\n' % (timestamp,l))
                 
