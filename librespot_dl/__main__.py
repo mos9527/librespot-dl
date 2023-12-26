@@ -84,6 +84,7 @@ def parse_args():
     group.add_argument("--output","-o", help="Output directory", default='.')
     group.add_argument("--quality", help="Audio quality", default="BEST", choices=["BEST","WORST"])
     group.add_argument("--no-lrc",help="Omit writing the lyrics",action='store_true',default=False)
+    group.add_argument("--no-src",help="Omit writing the audio source",action='store_true',default=False)
     group.add_argument("url",help="Spotify track/album/playlist URL", default='')
     args = parser.parse_args()
     args.load = os.path.expanduser(args.load)
@@ -273,11 +274,12 @@ def download_track(tid : TrackId, blocking = True):
         cover_art = get_image(cdn, cover_art_fid, stream=False)
 
         os.makedirs(os.path.dirname(audio_save_as),exist_ok=True)
-        logger.info("Downloading %s", audio_save_as)
-        with open(audio_save_as, 'wb') as f:
-            size = audio_stream.input_stream.stream().size()
-            write_bytes(audio_stream.input_stream.stream(),f,size)
-        tag_audio(audio_save_as, audio_stream.track, cover_art.content)
+        if not args.no_src:
+            logger.info("Downloading %s", audio_save_as)
+            with open(audio_save_as, 'wb') as f:
+                size = audio_stream.input_stream.stream().size()
+                write_bytes(audio_stream.input_stream.stream(),f,size)
+            tag_audio(audio_save_as, audio_stream.track, cover_art.content)
         if not args.no_lrc:
             logger.info("Writing %s", lyrics_save_as)
             lyrics = get_lyrics(session.api(), tid)
@@ -295,7 +297,7 @@ def download_track(tid : TrackId, blocking = True):
                     for alt in lyrics['lyrics']['alternatives']:
                         total_lines.append(alt['lines'][min(len(alt['lines'])-1,index)])                    
                     if lyrics['lyrics']['syncType'] == 'LINE_SYNCED':
-                        timestamp_ms = line['startTimeMs']
+                        timestamp_ms = int(line['startTimeMs'])
                     elif lyrics['lyrics']['syncType'] == 'UNSYNCED':                    
                         timestamp_ms = (index+1) * 1000
                     minutes, seconds = divmod(int(timestamp_ms // 1000), 60)
